@@ -98,27 +98,31 @@
         controls.target.set(0, 0, 0);
         controls.update();
 
-        // Play both animations
+        // Sequential loop: anim0(from 1.5s) → anim1(from 1.0s) → anim0 → …
         if (gltf.animations && gltf.animations.length > 0) {
           mixer = new THREE.AnimationMixer(model);
+          var clips     = gltf.animations;
+          var startTimes = [1.5, 1.0];
+          var current   = 0;
 
-          // Animation 0: NlaTrack (23s), start from 1.5s, loop
-          var a0 = mixer.clipAction(gltf.animations[0]);
-          a0.reset();
-          a0.setLoop(THREE.LoopRepeat, Infinity);
-          a0.clampWhenFinished = false;
-          a0.play();
-          a0.time = Math.min(1.5, gltf.animations[0].duration);
-
-          // Animation 1: NlaTrack.001 (10.75s), start from 1.0s, loop
-          if (gltf.animations.length > 1) {
-            var a1 = mixer.clipAction(gltf.animations[1]);
-            a1.reset();
-            a1.setLoop(THREE.LoopRepeat, Infinity);
-            a1.clampWhenFinished = false;
-            a1.play();
-            a1.time = Math.min(1.0, gltf.animations[1].duration);
+          function playClip(index) {
+            var clip   = clips[index % clips.length];
+            var start  = startTimes[index % startTimes.length];
+            var action = mixer.clipAction(clip);
+            action.reset();
+            action.setLoop(THREE.LoopOnce, 1);
+            action.clampWhenFinished = false;
+            action.play();
+            action.time = Math.min(start, clip.duration - 0.01);
+            current = index;
           }
+
+          // When one clip finishes, play the next
+          mixer.addEventListener('finished', function () {
+            playClip(current + 1);
+          });
+
+          playClip(0);
         }
 
         // Flush accumulated clock time so first delta is near zero
