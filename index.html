@@ -80,6 +80,8 @@
       'models/character.glb',
       function (gltf) {
         var model = gltf.scene;
+        // Character faces +X in glTF; rotate so it faces +Z (toward camera)
+        model.rotation.y = Math.PI / 2;
         scene.add(model);
 
         // Center and frame
