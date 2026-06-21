@@ -30,7 +30,7 @@
     </div>
   </div>
 
-  <!-- r128: last stable version with working examples/js global scripts -->
+  <!-- r128: global script build with working THREE.OrbitControls etc -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/DRACOLoader.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
@@ -71,17 +71,16 @@
 
     var draco = new THREE.DRACOLoader();
     draco.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/libs/draco/');
-
     var loader = new THREE.GLTFLoader();
     loader.setDRACOLoader(draco);
 
-    var mixer = null;
-    var clock  = new THREE.Clock();
+    // Procedural idle state
+    var model, bones = {}, baseY = 0;
 
     loader.load(
       'models/character.glb',
       function (gltf) {
-        var model = gltf.scene;
+        model = gltf.scene;
         scene.add(model);
 
         // Center and frame
@@ -89,6 +88,7 @@
         var center = box.getCenter(new THREE.Vector3());
         var size   = box.getSize(new THREE.Vector3());
         model.position.sub(center);
+        baseY = model.position.y;
 
         var maxDim = Math.max(size.x, size.y, size.z);
         var fovRad = THREE.Math.degToRad(camera.fov);
@@ -100,22 +100,10 @@
         controls.target.set(0, 0, 0);
         controls.update();
 
-        // Animate
-        if (gltf.animations && gltf.animations.length > 0) {
-          mixer = new THREE.AnimationMixer(model);
-          var clip   = gltf.animations[0];
-          var action = mixer.clipAction(clip);
-          var start  = clip.duration > 2.0 ? 2.0 : 0;
-
-          action.reset();
-          action.play();
-          action.time = start;
-          action.setLoop(THREE.LoopOnce, 1);
-          action.clampWhenFinished = true;
-        }
-
-        // Flush clock so first delta isn't the entire loading time
-        clock.getDelta();
+        // Collect bones by name for procedural animation
+        model.traverse(function (obj) {
+          if (obj.isBone) bones[obj.name] = obj;
+        });
 
         ui.style.display = 'none';
       },
@@ -127,15 +115,54 @@
         }
       },
       function (err) {
-        msgEl.firstChild.nodeValue = 'Error: ' + (err.message || 'failed to load');
+        msgEl.firstChild.nodeValue = 'Error: ' + (err.message || 'failed');
         console.error(err);
       }
     );
 
+    function idleAnimate(t) {
+      if (!model) return;
+
+      // Gentle float
+      model.position.y = baseY + Math.sin(t * 0.8) * 0.015;
+
+      // Breathing – spine expand/contract
+      if (bones.Spine01) bones.Spine01.rotation.x = Math.sin(t * 1.3) * 0.025;
+      if (bones.Spine02) bones.Spine02.rotation.x = Math.sin(t * 1.3 + 0.4) * 0.018;
+      if (bones.Waist)   bones.Waist.rotation.x   = Math.sin(t * 1.3 - 0.2) * 0.01;
+
+      // Head gentle sway
+      if (bones.Head) {
+        bones.Head.rotation.y = Math.sin(t * 0.45) * 0.06;
+        bones.Head.rotation.z = Math.sin(t * 0.6)  * 0.025;
+      }
+
+      // Neck follows head slightly
+      if (bones.NeckTwist01) bones.NeckTwist01.rotation.y = Math.sin(t * 0.45) * 0.03;
+
+      // Clavicles rise with breathing
+      if (bones.L_Clavicle) bones.L_Clavicle.rotation.z =  Math.sin(t * 1.3) * 0.018;
+      if (bones.R_Clavicle) bones.R_Clavicle.rotation.z = -Math.sin(t * 1.3) * 0.018;
+
+      // Arms drift subtly
+      if (bones.L_Upperarm) bones.L_Upperarm.rotation.z =  Math.sin(t * 0.55 + 0.5) * 0.04;
+      if (bones.R_Upperarm) bones.R_Upperarm.rotation.z = -Math.sin(t * 0.55 + 0.5) * 0.04;
+      if (bones.L_Forearm)  bones.L_Forearm.rotation.z  =  Math.sin(t * 0.4) * 0.02;
+      if (bones.R_Forearm)  bones.R_Forearm.rotation.z  = -Math.sin(t * 0.4) * 0.02;
+
+      // Hip subtle sway
+      if (bones.Hip) bones.Hip.rotation.z = Math.sin(t * 0.35) * 0.012;
+
+      // Thigh tiny weight shift
+      if (bones.L_Thigh) bones.L_Thigh.rotation.z =  Math.sin(t * 0.35) * 0.01;
+      if (bones.R_Thigh) bones.R_Thigh.rotation.z = -Math.sin(t * 0.35) * 0.01;
+    }
+
+    var clock = new THREE.Clock();
     (function animate() {
       requestAnimationFrame(animate);
-      var delta = clock.getDelta();
-      if (mixer) mixer.update(delta);
+      var t = clock.getElapsedTime();
+      idleAnimate(t);
       controls.update();
       renderer.render(scene, camera);
     })();
