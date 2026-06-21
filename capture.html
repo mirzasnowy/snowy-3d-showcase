@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; }
+    canvas { display: block; width: 100% !important; height: 100% !important; }
+    #loading { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); color: #fff; font-family: sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="loading">Loading…</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/DRACOLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+  <script>
+    var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(1);
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.setClearColor(0x000000, 0);
+    document.body.appendChild(renderer.domElement);
+
+    var scene  = new THREE.Scene();
+    var camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.01, 1000);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 1.5));
+    var sun = new THREE.DirectionalLight(0xffffff, 2.5);
+    sun.position.set(3, 5, 3);
+    scene.add(sun);
+    var rim = new THREE.DirectionalLight(0x8899ff, 0.8);
+    rim.position.set(-3, 2, -2);
+    scene.add(rim);
+
+    var controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = false; // off for deterministic capture
+
+    var draco = new THREE.DRACOLoader();
+    draco.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/libs/draco/');
+    var loader = new THREE.GLTFLoader();
+    loader.setDRACOLoader(draco);
+
+    // Globals exposed to puppeteer
+    window._ready  = false;
+    window._mixer  = null;
+    window._clips  = [];
+
+    // Manual step function called by puppeteer each frame
+    window.stepFrame = function (delta) {
+      if (window._mixer) window._mixer.update(delta);
+      renderer.render(scene, camera);
+    };
+
+    loader.load('models/character.glb', function (gltf) {
+      var model = gltf.scene;
+      model.rotation.y = -Math.PI / 2;
+      scene.add(model);
+
+      var box    = new THREE.Box3().setFromObject(model);
+      var center = box.getCenter(new THREE.Vector3());
+      var size   = box.getSize(new THREE.Vector3());
+      model.position.sub(center);
+
+      var maxDim = Math.max(size.x, size.y, size.z);
+      var fovRad = THREE.Math.degToRad(camera.fov);
+      var dist   = (maxDim / 2) / Math.tan(fovRad / 2) / 0.7;
+      camera.position.set(0, 0, dist);
+      camera.near = dist / 100;
+      camera.far  = dist * 10;
+      camera.updateProjectionMatrix();
+      controls.target.set(0, 0, 0);
+      controls.update();
+
+      window._clips = gltf.animations || [];
+
+      if (window._clips.length > 0) {
+        window._mixer = new THREE.AnimationMixer(model);
+        var clips      = window._clips;
+        var startTimes = [1.5, 1.0];
+        var current    = 0;
+
+        function playClip(index) {
+          var clip   = clips[index % clips.length];
+          var start  = startTimes[index % startTimes.length];
+          var action = window._mixer.clipAction(clip);
+          action.reset();
+          action.setLoop(THREE.LoopOnce, 1);
+          action.clampWhenFinished = false;
+          action.play();
+          action.time = Math.min(start, clip.duration - 0.01);
+          current = index;
+        }
+
+        window._mixer.addEventListener('finished', function () {
+          playClip(current + 1);
+        });
+
+        playClip(0);
+      }
+
+      document.getElementById('loading').style.display = 'none';
+      window._ready = true;
+    });
+  </script>
+</body>
+</html>
